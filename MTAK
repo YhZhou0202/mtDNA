@@ -1,0 +1,71 @@
+#!/bin/bash
+
+
+
+#!/bin/bash
+
+# MTAK: A script to process and assemble mitochondrial sequences
+# Usage: ./MTAK -ref <reference_file> -sam <sam_file> -N <N_value> -t <threads> -k <kmer_size> -2 <reverse_clean_reads>
+
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+  case $1 in
+    -ref) ref="$2"; shift ;;
+    -sam) sam="$2"; shift ;;
+    -N) N="$2"; shift ;;
+    -t) t="$2"; shift ;;
+    -k) k="$2"; shift ;;
+    -2) fq2="$2"; shift ;;
+    *) echo "Unknown parameter: $1"; exit 1 ;;
+  esac
+  shift
+done
+
+# Check required arguments
+if [[ -z "$ref" || -z "$sam" || -z "$N" || -z "$t" || -z "$fq2"|| -z "$k" ]]; then
+  echo "Usage: ./MTAK -ref <reference_file> -sam <sam_file> -N <N_value> -t <threads> -k <kmer_size> -2 <reverse clean reads>"
+  exit 1
+fi
+
+
+# Align sequences
+samtools fastq -N -F 4 -1 ./mapped1.fq -2 ./mapped2.fq "$sam"
+
+# Compress mapped reads
+gzip -f ./mapped1.fq
+
+# Extract sequence IDs for paired reads
+zcat ./mapped1.fq.gz | awk 'NR % 4 == 1 { sub(/\/1$/, "", $0); print }' > ./ID.txt
+cat ./ID.txt | sed '/^@/ s/$/\/2/' > ./2ID.txt
+
+# Filter mapped reads for read 2
+zcat "$fq2" | awk 'NR==FNR{a[$0]; next} $0 in a {flag=4} flag && flag--' ./2ID.txt - | gzip > ./mapped2.fq.gz
+
+# Process reads to generate modified sequences
+zcat ./mapped1.fq.gz | awk -v N="$N" 'NR%4==2{seq=substr($0,1,N); gsub(/T/,"X",seq); seq=seq substr($0,N+1,length($0)-2*N); end=substr($0,length($0)-N+1); gsub(/A/,"X",end); print seq end} NR%4!=2' | gzip > N_out.read1.gz
+zcat ./mapped2.fq.gz | awk -v N="$N" 'NR%4==2{seq=substr($0,1,N); gsub(/T/,"X",seq); seq=seq substr($0,N+1,length($0)-2*N); end=substr($0,length($0)-N+1); gsub(/A/,"X",end); print seq end} NR%4!=2' | gzip > N_out.read2.gz
+
+# Run GetOrganelle for mtDNA assembly
+get_organelle_from_reads.py -1 N_out.read1.gz -2 N_out.read2.gz -s "$ref" -R 20 -t "$t" -F animal_mt --reduce-reads-for-coverage inf --max-reads inf -k "$k" -o output
+
+echo "MTAK processing complete!"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
